@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -72,9 +71,7 @@ func (s *Storage) SaveVideoFromURL(url string, storageID string, filename string
 	outputPath := filepath.Join(folderPath, filename)
 
 	// Download the video
-	if s.debug {
-		log.Printf("DEBUG: Downloading video from %s to %s", url, outputPath)
-	}
+	// Note: Debug logging disabled in MCP mode to avoid stdout pollution
 
 	resp, err := http.Get(url)
 	if err != nil {
@@ -99,9 +96,7 @@ func (s *Storage) SaveVideoFromURL(url string, storageID string, filename string
 		return "", 0, fmt.Errorf("failed to save video: %w", err)
 	}
 
-	if s.debug {
-		log.Printf("DEBUG: Video saved successfully: %s (size: %d bytes)", outputPath, size)
-	}
+	// Note: Debug logging disabled in MCP mode to avoid stdout pollution
 
 	return outputPath, size, nil
 }
@@ -127,9 +122,7 @@ func (s *Storage) SaveMetadata(storageID string, metadata map[string]interface{}
 		return fmt.Errorf("failed to save metadata: %w", err)
 	}
 
-	if s.debug {
-		log.Printf("DEBUG: Metadata saved to %s", metadataPath)
-	}
+	// Note: Debug logging disabled in MCP mode to avoid stdout pollution
 
 	return nil
 }
@@ -156,9 +149,7 @@ func (s *Storage) SaveInputImage(storageID string, imagePath string) (string, er
 		return "", fmt.Errorf("failed to save input image: %w", err)
 	}
 
-	if s.debug {
-		log.Printf("DEBUG: Input image saved to %s", outputPath)
-	}
+	// Note: Debug logging disabled in MCP mode to avoid stdout pollution
 
 	return outputPath, nil
 }
@@ -197,9 +188,7 @@ func (s *Storage) ImageToDataURL(imagePath string) (string, error) {
 	encoded := base64.StdEncoding.EncodeToString(data)
 	dataURL := fmt.Sprintf("data:%s;base64,%s", mimeType, encoded)
 
-	if s.debug {
-		log.Printf("DEBUG: Converted image to data URL (mime: %s, size: %d bytes)", mimeType, len(data))
-	}
+	// Note: Debug logging disabled in MCP mode to avoid stdout pollution
 
 	return dataURL, nil
 }

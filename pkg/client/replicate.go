@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -64,17 +63,7 @@ func (c *ReplicateClient) CreatePrediction(ctx context.Context, modelVersion str
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	if c.debug {
-		log.Printf("DEBUG: Creating prediction")
-		log.Printf("  URL: %s", url)
-		log.Printf("  Model: %s", modelVersion)
-		// Don't log the full body if it contains base64 images
-		if len(body) > 1000 {
-			log.Printf("  Request Body: [%d bytes - too large to log]", len(body))
-		} else {
-			log.Printf("  Request Body: %s", string(body))
-		}
-	}
+	// Note: Debug logging disabled in MCP mode to avoid stdout pollution
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {
@@ -95,14 +84,7 @@ func (c *ReplicateClient) CreatePrediction(ctx context.Context, modelVersion str
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	if c.debug {
-		log.Printf("DEBUG: Response Status: %d", resp.StatusCode)
-		if len(respBody) > 1000 {
-			log.Printf("DEBUG: Response Body: [%d bytes - too large to log]", len(respBody))
-		} else {
-			log.Printf("DEBUG: Response Body: %s", string(respBody))
-		}
-	}
+	// Note: Debug logging disabled in MCP mode to avoid stdout pollution
 
 	// Handle specific error codes
 	if resp.StatusCode == http.StatusPaymentRequired {
@@ -161,29 +143,18 @@ func (c *ReplicateClient) GetPrediction(ctx context.Context, predictionID string
 
 // WaitForCompletion waits for a prediction to complete or timeout
 func (c *ReplicateClient) WaitForCompletion(ctx context.Context, predictionID string, timeout time.Duration) (*types.ReplicatePredictionResponse, error) {
-	if c.debug {
-		log.Printf("DEBUG: WaitForCompletion started for %s, timeout=%v", predictionID, timeout)
-	}
+	// Note: Debug logging disabled in MCP mode to avoid stdout pollution
 
 	// If timeout is 0, use context deadline or a very long timeout
 	var deadline time.Time
 	if timeout == 0 {
 		if d, ok := ctx.Deadline(); ok {
 			deadline = d
-			if c.debug {
-				log.Printf("DEBUG: Using context deadline: %v", deadline)
-			}
 		} else {
 			deadline = time.Now().Add(10 * time.Minute)
-			if c.debug {
-				log.Printf("DEBUG: No timeout specified, using 10 minute default")
-			}
 		}
 	} else {
 		deadline = time.Now().Add(timeout)
-		if c.debug {
-			log.Printf("DEBUG: Using specified timeout, deadline: %v", deadline)
-		}
 	}
 
 	ticker := time.NewTicker(2 * time.Second)
@@ -194,39 +165,27 @@ func (c *ReplicateClient) WaitForCompletion(ctx context.Context, predictionID st
 	for {
 		select {
 		case <-ctx.Done():
-			if c.debug {
-				log.Printf("DEBUG: WaitForCompletion cancelled by context")
-			}
+			// Note: Debug logging disabled in MCP mode to avoid stdout pollution
 			return nil, ctx.Err()
 		case <-ticker.C:
 			pollCount++
 			if time.Now().After(deadline) {
-				if c.debug {
-					log.Printf("DEBUG: WaitForCompletion timeout reached after %d polls", pollCount)
-				}
+				// Note: Debug logging disabled in MCP mode to avoid stdout pollution
 				prediction, _ := c.GetPrediction(ctx, predictionID)
 				return prediction, fmt.Errorf("operation timed out after %v", timeout)
 			}
 
-			if c.debug {
-				log.Printf("DEBUG: Poll #%d for prediction %s", pollCount, predictionID)
-			}
+			// Note: Debug logging disabled in MCP mode to avoid stdout pollution
 			prediction, err := c.GetPrediction(ctx, predictionID)
 			if err != nil {
-				if c.debug {
-					log.Printf("DEBUG: GetPrediction failed: %v", err)
-				}
+				// Note: Debug logging disabled in MCP mode to avoid stdout pollution
 				return nil, err
 			}
 
-			if c.debug {
-				log.Printf("DEBUG: Prediction status: %s", prediction.Status)
-			}
+			// Note: Debug logging disabled in MCP mode to avoid stdout pollution
 			switch prediction.Status {
 			case types.StatusSucceeded:
-				if c.debug {
-					log.Printf("DEBUG: Prediction succeeded after %d polls", pollCount)
-				}
+				// Note: Debug logging disabled in MCP mode to avoid stdout pollution
 				return prediction, nil
 			case types.StatusFailed:
 				errMsg := "prediction failed"

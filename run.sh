@@ -5,13 +5,6 @@ if [ -f .env ]; then
     export $(cat .env | grep -v '^#' | xargs)
 fi
 
-# Check for REPLICATE_API_TOKEN
-if [ -z "$REPLICATE_API_TOKEN" ]; then
-    echo "Error: REPLICATE_API_TOKEN environment variable is not set"
-    echo "Please set it in your environment or create a .env file"
-    exit 1
-fi
-
 case "$1" in
     "build")
         echo "Building Replicate Video AI server..."
@@ -24,11 +17,22 @@ case "$1" in
         ;;
     
     "list-models"|"list")
+        # Check for API token for terminal operations
+        if [ -z "$REPLICATE_API_TOKEN" ]; then
+            echo "Error: REPLICATE_API_TOKEN environment variable is not set"
+            echo "Please set it in your environment or create a .env file"
+            exit 1
+        fi
         go run ./cmd -list
         ;;
     
     "t2v")
         # Text-to-video generation
+        if [ -z "$REPLICATE_API_TOKEN" ]; then
+            echo "Error: REPLICATE_API_TOKEN environment variable is not set"
+            echo "Please set it in your environment or create a .env file"
+            exit 1
+        fi
         if [ -z "$2" ]; then
             echo "Usage: ./run.sh t2v <model> [prompt]"
             echo "Models: wan-t2v-fast, veo3, kling-master"
@@ -39,6 +43,11 @@ case "$1" in
     
     "i2v")
         # Image-to-video generation
+        if [ -z "$REPLICATE_API_TOKEN" ]; then
+            echo "Error: REPLICATE_API_TOKEN environment variable is not set"
+            echo "Please set it in your environment or create a .env file"
+            exit 1
+        fi
         if [ -z "$2" ] || [ -z "$3" ]; then
             echo "Usage: ./run.sh i2v <model> <image_path> [prompt]"
             echo "Models: wan-i2v-fast, veo3, kling-master"
@@ -49,6 +58,11 @@ case "$1" in
     
     "continue")
         # Continue checking prediction
+        if [ -z "$REPLICATE_API_TOKEN" ]; then
+            echo "Error: REPLICATE_API_TOKEN environment variable is not set"
+            echo "Please set it in your environment or create a .env file"
+            exit 1
+        fi
         if [ -z "$2" ]; then
             echo "Usage: ./run.sh continue <prediction_id>"
             exit 1
@@ -57,6 +71,11 @@ case "$1" in
         ;;
     
     "test-async")
+        if [ -z "$REPLICATE_API_TOKEN" ]; then
+            echo "Error: REPLICATE_API_TOKEN environment variable is not set"
+            echo "Please set it in your environment or create a .env file"
+            exit 1
+        fi
         go run ./cmd -test-async
         ;;
     
