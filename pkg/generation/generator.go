@@ -57,15 +57,22 @@ func (g *Generator) GenerateTextToVideo(ctx context.Context, params VideoParams)
 		return nil, fmt.Errorf("failed to create prediction: %w", err)
 	}
 
-	// Save metadata immediately
+	// Save metadata immediately with comprehensive information
 	metadata := map[string]interface{}{
-		"operation":     "text_to_video",
-		"model":         params.Model,
-		"model_id":      modelConfig.ID,
-		"prompt":        params.Prompt,
-		"parameters":    input,
-		"prediction_id": prediction.ID,
-		"status":        prediction.Status,
+		"operation":       "text_to_video",
+		"generation_type": "text-to-video",
+		"model":           params.Model,
+		"model_name":      modelConfig.Name,
+		"model_id":        modelConfig.ID,
+		"prompt":          params.Prompt,
+		"resolution":      params.Resolution,
+		"aspect_ratio":    params.AspectRatio,
+		"duration":        params.Duration,
+		"negative_prompt": params.NegativePrompt,
+		"parameters":      input,
+		"prediction_id":   prediction.ID,
+		"status":          prediction.Status,
+		"created_at":      time.Now().Format(time.RFC3339),
 	}
 
 	if err := g.storage.SaveMetadata(storageID, metadata); err != nil {
@@ -129,16 +136,23 @@ func (g *Generator) GenerateImageToVideo(ctx context.Context, params VideoParams
 		return nil, fmt.Errorf("failed to create prediction: %w", err)
 	}
 
-	// Save metadata immediately
+	// Save metadata immediately with comprehensive information
 	metadata := map[string]interface{}{
-		"operation":     "image_to_video",
-		"model":         params.Model,
-		"model_id":      modelConfig.ID,
-		"prompt":        params.Prompt,
-		"input_image":   params.ImagePath,
-		"parameters":    input,
-		"prediction_id": prediction.ID,
-		"status":        prediction.Status,
+		"operation":       "image_to_video",
+		"generation_type": "image-to-video",
+		"model":           params.Model,
+		"model_name":      modelConfig.Name,
+		"model_id":        modelConfig.ID,
+		"prompt":          params.Prompt,
+		"input_image":     params.ImagePath,
+		"resolution":      params.Resolution,
+		"aspect_ratio":    params.AspectRatio,
+		"duration":        params.Duration,
+		"negative_prompt": params.NegativePrompt,
+		"parameters":      input,
+		"prediction_id":   prediction.ID,
+		"status":          prediction.Status,
+		"created_at":      time.Now().Format(time.RFC3339),
 	}
 
 	if err := g.storage.SaveMetadata(storageID, metadata); err != nil {
@@ -206,14 +220,41 @@ func (g *Generator) ContinueGeneration(ctx context.Context, predictionID string,
 		return nil, fmt.Errorf("failed to save video: %w", err)
 	}
 
-	// Update metadata with completion info
-	metadata := map[string]interface{}{
-		"prediction_id": predictionID,
-		"status":        "completed",
-		"output_url":    outputURL,
-		"output_path":   videoPath,
-		"file_size":     fileSize,
-		"completed_at":  time.Now().Format(time.RFC3339),
+	// Load existing metadata to preserve generation parameters
+	existingMetadata, err := g.storage.LoadMetadata(storageID)
+	if err != nil {
+		log.Printf("WARNING: Failed to load existing metadata: %v", err)
+		existingMetadata = make(map[string]interface{})
+	}
+	
+	// Extract video metadata using ffmpeg if available
+	duration, resolution, _ := g.storage.ExtractVideoMetadata(videoPath)
+	
+	// Generate thumbnail if ffmpeg is available
+	thumbnailPath, _ := g.storage.GenerateThumbnail(storageID, videoPath)
+	
+	// Update metadata with completion info while preserving existing data
+	metadata := existingMetadata
+	metadata["prediction_id"] = predictionID
+	metadata["status"] = "completed"
+	metadata["output_url"] = outputURL
+	metadata["output_path"] = videoPath
+	metadata["file_size"] = fileSize
+	metadata["format"] = "mp4"
+	metadata["completed_at"] = time.Now().Format(time.RFC3339)
+	
+	// Add extracted metadata if available
+	if duration > 0 {
+		metadata["actual_duration"] = duration
+	}
+	if resolution != "" {
+		metadata["actual_resolution"] = resolution
+	}
+	if thumbnailPath != "" {
+		metadata["thumbnail_path"] = thumbnailPath
+		metadata["thumbnail_available"] = true
+	} else {
+		metadata["thumbnail_available"] = false
 	}
 
 	if err := g.storage.SaveMetadata(storageID, metadata); err != nil {

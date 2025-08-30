@@ -84,6 +84,66 @@ func (h *ReplicateVideoHandler) handleContinueOperation(ctx context.Context, arg
 		}, nil
 		
 	case "completed":
+		// Load full metadata for the completed video
+		metadata, err := h.storage.LoadMetadata(storageID)
+		if err != nil {
+			// Log but don't fail - use what we have
+			metadata = make(map[string]interface{})
+		}
+		
+		// Extract parameters from metadata if available
+		parameters := make(map[string]interface{})
+		if params, ok := metadata["parameters"].(map[string]interface{}); ok {
+			parameters = params
+		}
+		
+		// Extract model info
+		modelInfo := map[string]string{
+			"name": result.ModelName,
+		}
+		if modelName, ok := metadata["model_name"].(string); ok {
+			modelInfo["name"] = modelName
+		}
+		if model, ok := metadata["model"].(string); ok {
+			modelInfo["id"] = model
+		}
+		
+		// Build comprehensive metrics
+		metrics := map[string]interface{}{
+			"generation_time": result.Metrics.GenerationTime,
+			"file_size":       result.Metrics.FileSize,
+		}
+		
+		// Add metadata fields to metrics for frontend
+		if prompt, ok := metadata["prompt"].(string); ok {
+			metrics["prompt"] = prompt
+		}
+		// Prefer actual extracted resolution over requested
+		if actualRes, ok := metadata["actual_resolution"].(string); ok && actualRes != "" {
+			metrics["resolution"] = actualRes
+		} else if resolution, ok := metadata["resolution"].(string); ok {
+			metrics["resolution"] = resolution
+		}
+		// Prefer actual extracted duration over requested
+		if actualDur, ok := metadata["actual_duration"].(float64); ok && actualDur > 0 {
+			metrics["duration"] = actualDur
+		} else if duration, ok := metadata["duration"].(float64); ok {
+			metrics["duration"] = duration
+		}
+		if genType, ok := metadata["generation_type"].(string); ok {
+			metrics["generation_type"] = genType
+		}
+		if format, ok := metadata["format"].(string); ok {
+			metrics["format"] = format
+		}
+		// Add thumbnail path if available
+		if thumbnailPath, ok := metadata["thumbnail_path"].(string); ok && thumbnailPath != "" {
+			metrics["thumbnail_path"] = thumbnailPath
+			metrics["thumbnail_available"] = true
+		} else {
+			metrics["thumbnail_available"] = false
+		}
+		
 		// Operation completed - build success response
 		response := responses.BuildSuccessResponse(
 			"continue_operation",
@@ -91,14 +151,9 @@ func (h *ReplicateVideoHandler) handleContinueOperation(ctx context.Context, arg
 			map[string]string{
 				"output": result.FilePath,
 			},
-			map[string]string{
-				"name": result.ModelName,
-			},
-			map[string]interface{}{}, // Parameters not available in this context
-			map[string]interface{}{
-				"generation_time": result.Metrics.GenerationTime,
-				"file_size":       result.Metrics.FileSize,
-			},
+			modelInfo,
+			parameters,
+			metrics,
 			result.PredictionID,
 		)
 		
