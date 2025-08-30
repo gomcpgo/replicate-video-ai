@@ -3,6 +3,8 @@ package handler
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/gomcpgo/mcp/pkg/protocol"
@@ -40,8 +42,12 @@ func (h *ReplicateVideoHandler) handleContinueOperation(ctx context.Context, arg
 	// Since we don't have a built-in async executor yet, let's handle this directly
 	// by calling the generator's ContinueGeneration method
 	
-	// Use a placeholder storage ID since we might not have it
-	storageID := h.generateStorageID()
+	// Find existing storage ID for this prediction ID
+	storageID, err := h.findStorageIDForPrediction(operationID)
+	if err != nil || storageID == "" {
+		// If we can't find existing storage ID, generate a new one
+		storageID = h.generateStorageID()
+	}
 	
 	result, err := h.generator.ContinueGeneration(ctx, operationID, storageID, waitTime)
 	if err != nil {
@@ -91,44 +97,69 @@ func (h *ReplicateVideoHandler) handleContinueOperation(ctx context.Context, arg
 			metadata = make(map[string]interface{})
 		}
 		
-		// Extract parameters from metadata if available
+		// Build paths with absolute paths from relative paths in metadata
+		paths := make(map[string]string)
+		basePath := h.storage.GetStoragePath(storageID)
+		
+		// Convert relative paths to absolute
+		if metadataPaths, ok := metadata["paths"].(map[string]interface{}); ok {
+			if output, ok := metadataPaths["output"].(string); ok {
+				paths["output"] = filepath.Join(basePath, output)
+			}
+			if thumbnail, ok := metadataPaths["thumbnail"].(string); ok {
+				paths["thumbnail"] = filepath.Join(basePath, thumbnail)
+			}
+		} else {
+			// Fallback for old format
+			paths["output"] = result.FilePath
+		}
+		
+		// Extract parameters from metadata (includes prompt)
 		parameters := make(map[string]interface{})
 		if params, ok := metadata["parameters"].(map[string]interface{}); ok {
 			parameters = params
 		}
+		// Ensure prompt is in parameters
+		if prompt, ok := metadata["prompt"].(string); ok && prompt != "" {
+			parameters["prompt"] = prompt
+		}
+		// Add other parameter fields
+		if resolution, ok := metadata["resolution"].(string); ok {
+			parameters["resolution"] = resolution
+		}
+		if aspectRatio, ok := metadata["aspect_ratio"].(string); ok {
+			parameters["aspect_ratio"] = aspectRatio
+		}
+		if duration, ok := metadata["duration"].(int); ok {
+			parameters["duration"] = duration
+		}
+		if negativePrompt, ok := metadata["negative_prompt"].(string); ok {
+			parameters["negative_prompt"] = negativePrompt
+		}
 		
-		// Extract model info
-		modelInfo := map[string]string{
-			"name": result.ModelName,
+		// Build model info
+		modelInfo := make(map[string]string)
+		if modelID, ok := metadata["model"].(string); ok {
+			modelInfo["id"] = modelID
 		}
 		if modelName, ok := metadata["model_name"].(string); ok {
 			modelInfo["name"] = modelName
-		}
-		if model, ok := metadata["model"].(string); ok {
-			modelInfo["id"] = model
+		} else if result.ModelName != "" {
+			modelInfo["name"] = result.ModelName
 		}
 		
-		// Build comprehensive metrics
+		// Build metrics (video metadata only, no prompt/params)
 		metrics := map[string]interface{}{
 			"generation_time": result.Metrics.GenerationTime,
 			"file_size":       result.Metrics.FileSize,
 		}
 		
-		// Add metadata fields to metrics for frontend
-		if prompt, ok := metadata["prompt"].(string); ok {
-			metrics["prompt"] = prompt
-		}
-		// Prefer actual extracted resolution over requested
+		// Add actual video metadata to metrics
 		if actualRes, ok := metadata["actual_resolution"].(string); ok && actualRes != "" {
-			metrics["resolution"] = actualRes
-		} else if resolution, ok := metadata["resolution"].(string); ok {
-			metrics["resolution"] = resolution
+			metrics["actual_resolution"] = actualRes
 		}
-		// Prefer actual extracted duration over requested
 		if actualDur, ok := metadata["actual_duration"].(float64); ok && actualDur > 0 {
-			metrics["duration"] = actualDur
-		} else if duration, ok := metadata["duration"].(float64); ok {
-			metrics["duration"] = duration
+			metrics["actual_duration"] = actualDur
 		}
 		if genType, ok := metadata["generation_type"].(string); ok {
 			metrics["generation_type"] = genType
@@ -136,21 +167,12 @@ func (h *ReplicateVideoHandler) handleContinueOperation(ctx context.Context, arg
 		if format, ok := metadata["format"].(string); ok {
 			metrics["format"] = format
 		}
-		// Add thumbnail path if available
-		if thumbnailPath, ok := metadata["thumbnail_path"].(string); ok && thumbnailPath != "" {
-			metrics["thumbnail_path"] = thumbnailPath
-			metrics["thumbnail_available"] = true
-		} else {
-			metrics["thumbnail_available"] = false
-		}
 		
 		// Operation completed - build success response
 		response := responses.BuildSuccessResponse(
 			"continue_operation",
 			result.ID,
-			map[string]string{
-				"output": result.FilePath,
-			},
+			paths,
 			modelInfo,
 			parameters,
 			metrics,
@@ -176,6 +198,38 @@ func (h *ReplicateVideoHandler) handleContinueOperation(ctx context.Context, arg
 // generateStorageID creates a unique storage ID for continue operations
 func (h *ReplicateVideoHandler) generateStorageID() string {
 	return h.storage.GenerateStorageID()
+}
+
+// findStorageIDForPrediction searches for existing storage ID with given prediction ID
+func (h *ReplicateVideoHandler) findStorageIDForPrediction(predictionID string) (string, error) {
+	// Get the root videos folder
+	videosDir := h.storage.GetStoragePath("")
+	
+	// Read all subdirectories (storage IDs)
+	entries, err := os.ReadDir(videosDir)
+	if err != nil {
+		return "", fmt.Errorf("failed to read videos directory: %w", err)
+	}
+	
+	// Search through each storage directory
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		
+		storageID := entry.Name()
+		metadata, err := h.storage.LoadMetadata(storageID)
+		if err != nil {
+			continue // Skip if can't load metadata
+		}
+		
+		// Check if this metadata matches the prediction ID
+		if metaPredID, ok := metadata["prediction_id"].(string); ok && metaPredID == predictionID {
+			return storageID, nil
+		}
+	}
+	
+	return "", fmt.Errorf("storage ID not found for prediction %s", predictionID)
 }
 
 // Helper functions to extract values from result map (for future async executor integration)

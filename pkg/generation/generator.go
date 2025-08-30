@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"path/filepath"
 	"time"
 
 	"github.com/gomcpgo/replicate_video_ai/pkg/client"
@@ -57,22 +58,37 @@ func (g *Generator) GenerateTextToVideo(ctx context.Context, params VideoParams)
 		return nil, fmt.Errorf("failed to create prediction: %w", err)
 	}
 
-	// Save metadata immediately with comprehensive information
+	// Save metadata with consistent structure
 	metadata := map[string]interface{}{
-		"operation":       "text_to_video",
-		"generation_type": "text-to-video",
-		"model":           params.Model,
-		"model_name":      modelConfig.Name,
-		"model_id":        modelConfig.ID,
-		"prompt":          params.Prompt,
-		"resolution":      params.Resolution,
-		"aspect_ratio":    params.AspectRatio,
-		"duration":        params.Duration,
-		"negative_prompt": params.NegativePrompt,
-		"parameters":      input,
-		"prediction_id":   prediction.ID,
-		"status":          prediction.Status,
-		"created_at":      time.Now().Format(time.RFC3339),
+		"operation":     "text_to_video",
+		"status":        prediction.Status,
+		"prediction_id": prediction.ID,
+		"storage_id":    storageID,
+		"created_at":    time.Now().Format(time.RFC3339),
+		
+		// Model information
+		"model": map[string]interface{}{
+			"id":   modelConfig.ID,
+			"name": modelConfig.Name,
+		},
+		
+		// Parameters (user inputs)
+		"parameters": map[string]interface{}{
+			"prompt":          params.Prompt,
+			"resolution":      params.Resolution,
+			"aspect_ratio":    params.AspectRatio,
+			"duration":        params.Duration,
+			"negative_prompt": params.NegativePrompt,
+			"raw_input":       input, // Keep raw input for reference
+		},
+		
+		// Metrics (will be updated on completion)
+		"metrics": map[string]interface{}{
+			"generation_type": "text-to-video",
+		},
+		
+		// Paths will be added on completion
+		"paths": map[string]interface{}{},
 	}
 
 	if err := g.storage.SaveMetadata(storageID, metadata); err != nil {
@@ -136,23 +152,38 @@ func (g *Generator) GenerateImageToVideo(ctx context.Context, params VideoParams
 		return nil, fmt.Errorf("failed to create prediction: %w", err)
 	}
 
-	// Save metadata immediately with comprehensive information
+	// Save metadata with consistent structure
 	metadata := map[string]interface{}{
-		"operation":       "image_to_video",
-		"generation_type": "image-to-video",
-		"model":           params.Model,
-		"model_name":      modelConfig.Name,
-		"model_id":        modelConfig.ID,
-		"prompt":          params.Prompt,
-		"input_image":     params.ImagePath,
-		"resolution":      params.Resolution,
-		"aspect_ratio":    params.AspectRatio,
-		"duration":        params.Duration,
-		"negative_prompt": params.NegativePrompt,
-		"parameters":      input,
-		"prediction_id":   prediction.ID,
-		"status":          prediction.Status,
-		"created_at":      time.Now().Format(time.RFC3339),
+		"operation":     "image_to_video",
+		"status":        prediction.Status,
+		"prediction_id": prediction.ID,
+		"storage_id":    storageID,
+		"created_at":    time.Now().Format(time.RFC3339),
+		
+		// Model information
+		"model": map[string]interface{}{
+			"id":   modelConfig.ID,
+			"name": modelConfig.Name,
+		},
+		
+		// Parameters (user inputs)
+		"parameters": map[string]interface{}{
+			"prompt":          params.Prompt,
+			"input_image":     "input" + filepath.Ext(params.ImagePath), // Relative path
+			"resolution":      params.Resolution,
+			"aspect_ratio":    params.AspectRatio,
+			"duration":        params.Duration,
+			"negative_prompt": params.NegativePrompt,
+			"raw_input":       input, // Keep raw input for reference
+		},
+		
+		// Metrics (will be updated on completion)
+		"metrics": map[string]interface{}{
+			"generation_type": "image-to-video",
+		},
+		
+		// Paths will be added on completion
+		"paths": map[string]interface{}{},
 	}
 
 	if err := g.storage.SaveMetadata(storageID, metadata); err != nil {
@@ -233,29 +264,43 @@ func (g *Generator) ContinueGeneration(ctx context.Context, predictionID string,
 	// Generate thumbnail if ffmpeg is available
 	thumbnailPath, _ := g.storage.GenerateThumbnail(storageID, videoPath)
 	
-	// Update metadata with completion info while preserving existing data
+	// IMPORTANT: Start with existing metadata to preserve all original fields
 	metadata := existingMetadata
-	metadata["prediction_id"] = predictionID
+	
+	// Update status
 	metadata["status"] = "completed"
-	metadata["output_url"] = outputURL
-	metadata["output_path"] = videoPath
-	metadata["file_size"] = fileSize
-	metadata["format"] = "mp4"
 	metadata["completed_at"] = time.Now().Format(time.RFC3339)
 	
-	// Add extracted metadata if available
-	if duration > 0 {
-		metadata["actual_duration"] = duration
-	}
-	if resolution != "" {
-		metadata["actual_resolution"] = resolution
+	// Update paths with relative paths (consistent structure)
+	paths := map[string]interface{}{
+		"output": "video.mp4", // Always relative
 	}
 	if thumbnailPath != "" {
-		metadata["thumbnail_path"] = thumbnailPath
-		metadata["thumbnail_available"] = true
-	} else {
-		metadata["thumbnail_available"] = false
+		paths["thumbnail"] = "thumbnail.jpg" // Always relative
 	}
+	metadata["paths"] = paths
+	
+	// Update or create metrics (preserve structure)
+	metrics := make(map[string]interface{})
+	if existingMetrics, ok := metadata["metrics"].(map[string]interface{}); ok {
+		metrics = existingMetrics
+	}
+	metrics["file_size"] = fileSize
+	metrics["generation_time"] = time.Since(startTime).Seconds()
+	if duration > 0 {
+		metrics["actual_duration"] = duration
+	}
+	if resolution != "" {
+		metrics["actual_resolution"] = resolution
+	}
+	metrics["format"] = "mp4"
+	if genType, ok := metadata["generation_type"].(string); ok {
+		metrics["generation_type"] = genType
+	}
+	metadata["metrics"] = metrics
+	
+	// Store the output URL separately for reference
+	metadata["output_url"] = outputURL
 
 	if err := g.storage.SaveMetadata(storageID, metadata); err != nil {
 		log.Printf("WARNING: Failed to update metadata: %v", err)
