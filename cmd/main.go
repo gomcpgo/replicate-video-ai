@@ -8,8 +8,12 @@ import (
 	"os"
 	"time"
 
+	"github.com/gomcpgo/mcp/pkg/handler"
+	"github.com/gomcpgo/mcp/pkg/server"
 	"github.com/gomcpgo/replicate_video_ai/pkg/client"
+	"github.com/gomcpgo/replicate_video_ai/pkg/config"
 	"github.com/gomcpgo/replicate_video_ai/pkg/generation"
+	replhandler "github.com/gomcpgo/replicate_video_ai/pkg/handler"
 	"github.com/gomcpgo/replicate_video_ai/pkg/responses"
 	"github.com/gomcpgo/replicate_video_ai/pkg/storage"
 )
@@ -114,8 +118,33 @@ func main() {
 	}
 
 	// MCP Server mode
-	fmt.Println("MCP Server mode not implemented yet. Use terminal mode for testing.")
-	fmt.Println("Run with --help to see available options.")
+	// Load configuration
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		// For MCP mode, we need to exit cleanly without stdout pollution
+		os.Exit(1)
+	}
+	
+	// Create handler
+	h, err := replhandler.NewReplicateVideoHandler(cfg.ReplicateAPIToken, cfg.VideosRootFolder, false) // Disable debug for MCP mode
+	if err != nil {
+		log.Fatalf("Failed to create handler: %v", err)
+	}
+	
+	// Create handler registry
+	registry := handler.NewHandlerRegistry()
+	registry.RegisterToolHandler(h)
+	
+	// Create and start server
+	srv := server.New(server.Options{
+		Name:     "replicate-video-ai",
+		Version:  version,
+		Registry: registry,
+	})
+	
+	if err := srv.Run(); err != nil {
+		log.Fatalf("Server error: %v", err)
+	}
 }
 
 func listAvailableModels() {

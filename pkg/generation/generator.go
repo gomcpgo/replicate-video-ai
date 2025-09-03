@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"path/filepath"
 	"time"
 
 	"github.com/gomcpgo/replicate_video_ai/pkg/client"
@@ -57,15 +58,37 @@ func (g *Generator) GenerateTextToVideo(ctx context.Context, params VideoParams)
 		return nil, fmt.Errorf("failed to create prediction: %w", err)
 	}
 
-	// Save metadata immediately
+	// Save metadata with consistent structure
 	metadata := map[string]interface{}{
 		"operation":     "text_to_video",
-		"model":         params.Model,
-		"model_id":      modelConfig.ID,
-		"prompt":        params.Prompt,
-		"parameters":    input,
-		"prediction_id": prediction.ID,
 		"status":        prediction.Status,
+		"prediction_id": prediction.ID,
+		"storage_id":    storageID,
+		"created_at":    time.Now().Format(time.RFC3339),
+		
+		// Model information
+		"model": map[string]interface{}{
+			"id":   modelConfig.ID,
+			"name": modelConfig.Name,
+		},
+		
+		// Parameters (user inputs)
+		"parameters": map[string]interface{}{
+			"prompt":          params.Prompt,
+			"resolution":      params.Resolution,
+			"aspect_ratio":    params.AspectRatio,
+			"duration":        params.Duration,
+			"negative_prompt": params.NegativePrompt,
+			"raw_input":       input, // Keep raw input for reference
+		},
+		
+		// Metrics (will be updated on completion)
+		"metrics": map[string]interface{}{
+			"generation_type": "text-to-video",
+		},
+		
+		// Paths will be added on completion
+		"paths": map[string]interface{}{},
 	}
 
 	if err := g.storage.SaveMetadata(storageID, metadata); err != nil {
@@ -129,16 +152,38 @@ func (g *Generator) GenerateImageToVideo(ctx context.Context, params VideoParams
 		return nil, fmt.Errorf("failed to create prediction: %w", err)
 	}
 
-	// Save metadata immediately
+	// Save metadata with consistent structure
 	metadata := map[string]interface{}{
 		"operation":     "image_to_video",
-		"model":         params.Model,
-		"model_id":      modelConfig.ID,
-		"prompt":        params.Prompt,
-		"input_image":   params.ImagePath,
-		"parameters":    input,
-		"prediction_id": prediction.ID,
 		"status":        prediction.Status,
+		"prediction_id": prediction.ID,
+		"storage_id":    storageID,
+		"created_at":    time.Now().Format(time.RFC3339),
+		
+		// Model information
+		"model": map[string]interface{}{
+			"id":   modelConfig.ID,
+			"name": modelConfig.Name,
+		},
+		
+		// Parameters (user inputs)
+		"parameters": map[string]interface{}{
+			"prompt":          params.Prompt,
+			"input_image":     "input" + filepath.Ext(params.ImagePath), // Relative path
+			"resolution":      params.Resolution,
+			"aspect_ratio":    params.AspectRatio,
+			"duration":        params.Duration,
+			"negative_prompt": params.NegativePrompt,
+			"raw_input":       input, // Keep raw input for reference
+		},
+		
+		// Metrics (will be updated on completion)
+		"metrics": map[string]interface{}{
+			"generation_type": "image-to-video",
+		},
+		
+		// Paths will be added on completion
+		"paths": map[string]interface{}{},
 	}
 
 	if err := g.storage.SaveMetadata(storageID, metadata); err != nil {
@@ -206,15 +251,56 @@ func (g *Generator) ContinueGeneration(ctx context.Context, predictionID string,
 		return nil, fmt.Errorf("failed to save video: %w", err)
 	}
 
-	// Update metadata with completion info
-	metadata := map[string]interface{}{
-		"prediction_id": predictionID,
-		"status":        "completed",
-		"output_url":    outputURL,
-		"output_path":   videoPath,
-		"file_size":     fileSize,
-		"completed_at":  time.Now().Format(time.RFC3339),
+	// Load existing metadata to preserve generation parameters
+	existingMetadata, err := g.storage.LoadMetadata(storageID)
+	if err != nil {
+		log.Printf("WARNING: Failed to load existing metadata: %v", err)
+		existingMetadata = make(map[string]interface{})
 	}
+	
+	// Extract video metadata using ffmpeg if available
+	duration, resolution, _ := g.storage.ExtractVideoMetadata(videoPath)
+	
+	// Generate thumbnail if ffmpeg is available
+	thumbnailPath, _ := g.storage.GenerateThumbnail(storageID, videoPath)
+	
+	// IMPORTANT: Start with existing metadata to preserve all original fields
+	metadata := existingMetadata
+	
+	// Update status
+	metadata["status"] = "completed"
+	metadata["completed_at"] = time.Now().Format(time.RFC3339)
+	
+	// Update paths with relative paths (consistent structure)
+	paths := map[string]interface{}{
+		"output": "video.mp4", // Always relative
+	}
+	if thumbnailPath != "" {
+		paths["thumbnail"] = "thumbnail.jpg" // Always relative
+	}
+	metadata["paths"] = paths
+	
+	// Update or create metrics (preserve structure)
+	metrics := make(map[string]interface{})
+	if existingMetrics, ok := metadata["metrics"].(map[string]interface{}); ok {
+		metrics = existingMetrics
+	}
+	metrics["file_size"] = fileSize
+	metrics["generation_time"] = time.Since(startTime).Seconds()
+	if duration > 0 {
+		metrics["actual_duration"] = duration
+	}
+	if resolution != "" {
+		metrics["actual_resolution"] = resolution
+	}
+	metrics["format"] = "mp4"
+	if genType, ok := metadata["generation_type"].(string); ok {
+		metrics["generation_type"] = genType
+	}
+	metadata["metrics"] = metrics
+	
+	// Store the output URL separately for reference
+	metadata["output_url"] = outputURL
 
 	if err := g.storage.SaveMetadata(storageID, metadata); err != nil {
 		log.Printf("WARNING: Failed to update metadata: %v", err)

@@ -23,11 +23,8 @@ func LoadConfig() (*Config, error) {
 		PollInterval:  2 * time.Second,
 	}
 
-	// Required: API token
+	// Optional: API token (MCP server can start without it)
 	cfg.ReplicateAPIToken = os.Getenv("REPLICATE_API_TOKEN")
-	if cfg.ReplicateAPIToken == "" {
-		return nil, fmt.Errorf("REPLICATE_API_TOKEN environment variable is required")
-	}
 
 	// Optional: Videos root folder
 	cfg.VideosRootFolder = os.Getenv("REPLICATE_VIDEOS_ROOT_FOLDER")
